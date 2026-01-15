@@ -1,14 +1,17 @@
 // /main.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:jplan_manager/pages/login_page.dart';
-import 'package:jplan_manager/pages/todo_main_page.dart'; // TodoMainPage import
-import 'package:jplan_manager/pages/diary_main_page.dart'; // DiaryMainPage import
-import 'package:jplan_manager/pages/approval_page.dart';
-import 'package:jplan_manager/services/nas_auth_service.dart';
-import 'package:jplan_manager/services/nas_api_service.dart';
 import 'package:intl/date_symbol_data_local.dart';
+
+import 'package:jplan_manager/pages/login_page.dart';
+import 'package:jplan_manager/pages/todo_main_page.dart';
+import 'package:jplan_manager/pages/diary_main_page.dart';
+import 'package:jplan_manager/pages/approval_page.dart';
+import 'package:jplan_manager/pages/splash_page.dart'; // ✅ SplashPage import
+import 'package:jplan_manager/services/nas_auth_service.dart';
+
 void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ko_KR');
   runApp(const MyApp());
 }
@@ -20,11 +23,11 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        Provider<NasApiService>(create: (_) => NasApiService()),
         ChangeNotifierProvider<NasAuthService>(create: (_) => NasAuthService()),
       ],
       child: MaterialApp(
         title: '선생님 관리 앱',
+        debugShowCheckedModeBanner: false,
         theme: ThemeData(
           primarySwatch: Colors.blue,
           appBarTheme: const AppBarTheme(
@@ -34,39 +37,19 @@ class MyApp extends StatelessWidget {
           ),
           elevatedButtonTheme: ElevatedButtonThemeData(
             style: ElevatedButton.styleFrom(
-              // ✅ minimumSize 속성을 제거하거나, 특정 값으로 지정합니다.
-              // minimumSize: const Size(0, 50), // 또는 이 라인 전체를 주석 처리
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              // 필요하다면 패딩을 조절해 버튼 크기를 키울 수 있습니다.
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
             ),
           ),
         ),
-        home: const AuthWrapper(),
+        // ✅ 앱을 켜면 무조건 스플래시 화면부터 시작!
+        home: const SplashPage(),
       ),
     );
   }
 }
 
-class AuthWrapper extends StatelessWidget {
-  const AuthWrapper({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Consumer<NasAuthService>(
-      builder: (context, authService, _) {
-        if (authService.isTeacherLoggedIn) {
-          return const HomePageWrapper();
-        } else {
-          return const LoginPage();
-        }
-      },
-    );
-  }
-}
-
+// 탭 바(BottomNavigationBar)가 있는 메인 화면 틀
 class HomePageWrapper extends StatefulWidget {
   const HomePageWrapper({super.key});
 
@@ -78,57 +61,67 @@ class _HomePageWrapperState extends State<HomePageWrapper> {
   int _selectedIndex = 0;
 
   static const List<Widget> _widgetOptions = <Widget>[
-    TodoMainPage(),    // 첫 번째 탭: 학생 ToDo 관리
-    DiaryMainPage(),   // 두 번째 탭: 학생 다이어리 관리
-    ApprovalPage(),    // 세 번째 탭: 회원가입 승인
+    TodoMainPage(),
+    DiaryMainPage(),
+    ApprovalPage(),
   ];
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
+  }
+
+  void _logout() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('로그아웃'),
+        content: const Text('정말 로그아웃 하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await Provider.of<NasAuthService>(context, listen: false).logout();
+              if (mounted) {
+                // 로그아웃 시 로그인 페이지로 이동하며 모든 스택 제거
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                      (route) => false,
+                );
+              }
+            },
+            child: const Text('로그아웃', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ✅ [수정] body 부분을 Column과 Expanded로 감싸서 너비 제약 설정
+      appBar: AppBar(
+        title: const Text('선생님 관리 모드'),
+        actions: [
+          IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
+        ],
+      ),
       body: Column(
         children: [
-          Expanded(
-            child: _widgetOptions.elementAt(_selectedIndex),
-          ),
+          Expanded(child: _widgetOptions.elementAt(_selectedIndex)),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-            icon: Icon(Icons.list_alt),
-            label: 'ToDo 관리',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.edit_note),
-            label: '다이어리 관리',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_add),
-            label: '회원가입 승인',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.list_alt), label: 'ToDo'),
+          BottomNavigationBarItem(icon: Icon(Icons.edit_note), label: '다이어리'),
+          BottomNavigationBarItem(icon: Icon(Icons.person_add), label: '승인'),
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: Colors.blue,
         onTap: _onItemTapped,
-      ),
-      floatingActionButton: Visibility(
-        visible: _selectedIndex == 0,
-        child: FloatingActionButton(
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('새로운 ToDo 추가 기능 구현 필요')),
-            );
-          },
-          child: const Icon(Icons.add),
-        ),
+        type: BottomNavigationBarType.fixed,
       ),
     );
   }

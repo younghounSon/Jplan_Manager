@@ -2,10 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:jplan_manager/services/nas_api_service.dart';
 import 'package:jplan_manager/services/nas_auth_service.dart';
 import 'package:jplan_manager/pages/signup_page.dart';
-
+import 'package:jplan_manager/pages/todo_main_page.dart'; // ✅ 메인 페이지 import 필수!
+import 'package:jplan_manager/main.dart';
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -16,43 +16,42 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-  final NasApiService _api = NasApiService();
+
+  // ✅ NasApiService 제거 (AuthService가 내부에서 처리함)
 
   Future<void> _login() async {
-    print('1. 로그인 버튼 클릭. _login 함수 시작');
+    // 1. 입력값 검증
+    if (_idController.text.isEmpty || _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('아이디와 비밀번호를 모두 입력해주세요.')),
+      );
+      return;
+    }
+
+    print('1. 로그인 요청 시작 (Service 호출)');
+
     try {
-      final response = await _api.loginTeacher(_idController.text, _passwordController.text);
-      print('2. API 응답 수신: ${response}');
+      // ✅ 2. Provider를 통해 AuthService의 login 함수 호출
+      // 이제 이메일과 비밀번호만 넘겨주면, 서비스가 알아서 API 호출 + 기기 저장까지 수행합니다.
+      await Provider.of<NasAuthService>(context, listen: false)
+          .login(_idController.text, _passwordController.text);
 
-      // 서버 응답에 'message' 키가 있고 그 값이 'Login successful'인지 확인
-      if (response['message'] == 'Login successful') {
-        print('3. 로그인 성공. Provider 상태 업데이트 시도.');
+      print('2. 로그인 성공 및 저장 완료. 메인 페이지로 이동.');
 
-        final userId = response['user_id'];
-        final userData = {
-          'id': userId,
-          'role': response['role'] ?? 'teacher', // 서버 응답에 role이 있다면 사용, 없으면 'teacher'로 기본값 설정
-          'status': response['status'] ?? 'approved', // 서버 응답에 status가 있다면 사용, 없으면 'approved'로 기본값 설정
-        };
-
-        if (mounted) {
-          // Provider 상태만 업데이트. AuthWrapper가 페이지 전환을 감지함
-          Provider.of<NasAuthService>(context, listen: false).login(userId, userData);
-          print('4. Provider 상태 업데이트 완료. isTeacherLoggedIn: ${Provider.of<NasAuthService>(context, listen: false).isTeacherLoggedIn}');
-        }
-      } else {
-        print('3. 로그인 실패: 메시지 불일치');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('로그인 실패: 자격 증명 오류')),
-          );
-        }
+      if (mounted) {
+        // ✅ 3. 성공 시 메인 페이지로 이동 (뒤로가기 방지를 위해 pushReplacement 사용)
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const HomePageWrapper()),
+        );
       }
     } catch (e) {
       print('Error: $e');
       if (mounted) {
+        // 실패 시 에러 메시지 표시
+        // AuthService에서 rethrow한 에러 메시지가 여기 뜹니다.
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
+          SnackBar(content: Text('로그인 실패: ${e.toString().replaceAll("Exception:", "")}')),
         );
       }
     }
@@ -66,14 +65,33 @@ class _LoginPageState extends State<LoginPage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            TextField(controller: _idController, decoration: const InputDecoration(labelText: '아이디')),
-            TextField(controller: _passwordController, decoration: const InputDecoration(labelText: '비밀번호'), obscureText: true),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () => _login(), // 콜백 함수로 명확하게 감싸서 호출
-              child: const Text('로그인'),
+            TextField(
+              controller: _idController,
+              decoration: const InputDecoration(labelText: '아이디 (이메일)'),
+              keyboardType: TextInputType.emailAddress,
             ),
+            TextField(
+              controller: _passwordController,
+              decoration: const InputDecoration(labelText: '비밀번호'),
+              obscureText: true,
+            ),
+            const SizedBox(height: 20),
+
+            // 로그인 버튼
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _login,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: const Text('로그인', style: TextStyle(fontSize: 16)),
+              ),
+            ),
+
             const SizedBox(height: 10),
+
+            // 회원가입 버튼
             TextButton(
               onPressed: () {
                 Navigator.push(

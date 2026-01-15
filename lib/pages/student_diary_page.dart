@@ -219,6 +219,7 @@ class _StudentDiaryPageState extends State<StudentDiaryPage> {
               style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
             ),
           ),
+          const SizedBox(height: 50),
         ],
       ),
     );

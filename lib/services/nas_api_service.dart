@@ -83,21 +83,36 @@ class NasApiService {
   }
 
   // 4-1. 투두 내용/제목 수정
-  Future<void> editTodo(int todoId, String newTitle, String newContent, int teacherId) async {
+  Future<void> updateTodo(int todoId, Map<String, dynamic> updateData) async {
+    // 4. todoId의 타입을 String에서 int로 변경합니다.
     final url = Uri.parse('$_baseUrl/todos/$todoId');
-
     final response = await http.put(
       url,
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'title': newTitle,
-        'content': newContent,
-        'last_edited_by_id': teacherId,
-      }),
+      headers: {'Content-Type': 'application/json; charset=UTF-8'},
+      body: json.encode(updateData),
     );
 
-    if (!_isSuccess(response.statusCode)) {
-      throw Exception('ToDo 수정 실패(${response.statusCode}): ${utf8.decode(response.bodyBytes)}');
+    if (response.statusCode != 200) {
+      final errorData = json.decode(response.body);
+      throw Exception(errorData['error'] ?? '할 일 업데이트 실패');
+    }
+  }
+
+  Future<int> addTodo(Map<String, dynamic> todoData) async {
+    final url = Uri.parse('$_baseUrl/todos');
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json; charset=UTF-8'},
+      body: json.encode(todoData),
+    );
+
+    // 2. 서버에서 성공적으로 생성되었을 때의 상태 코드는 '201 Created' 입니다.
+    if (response.statusCode == 201) {
+      final responseData = json.decode(response.body);
+      // 3. 서버가 반환해주는 새로운 ID를 int 타입으로 반환합니다.
+      return responseData['id'];
+    } else {
+      throw Exception('할 일 추가 실패');
     }
   }
 

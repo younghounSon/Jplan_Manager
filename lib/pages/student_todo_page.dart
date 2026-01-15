@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:jplan_manager/services/nas_api_service.dart';
 import 'package:jplan_manager/models/todo.dart';
-import 'package:provider/provider.dart'; // ✅ Provider import 추가
-import 'package:jplan_manager/services/nas_auth_service.dart'; // ✅ AuthService import 추가
+import 'package:provider/provider.dart';
+import 'package:jplan_manager/services/nas_auth_service.dart';
 
 class StudentTodoPage extends StatefulWidget {
   final int studentId;
@@ -16,6 +16,8 @@ class StudentTodoPage extends StatefulWidget {
 class _StudentTodoPageState extends State<StudentTodoPage> {
   final NasApiService _api = NasApiService();
   late Future<List<Todo>> _todosFuture;
+
+  // 조회용 기간 설정 (기본값: 오늘)
   DateTime _startDate = DateTime.now();
   DateTime _endDate = DateTime.now();
 
@@ -25,6 +27,7 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
     _loadTodos();
   }
 
+  // 목록 불러오기
   void _loadTodos() {
     setState(() {
       final formattedStart = DateFormat('yyyy-MM-dd').format(_startDate);
@@ -33,6 +36,7 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
     });
   }
 
+  // 날짜 범위 선택 (조회용)
   Future<void> _selectDateRange() async {
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
@@ -49,10 +53,115 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
     }
   }
 
-  // ✅ [수정] 선생님 상태만 업데이트하는 함수
+  // ✅ [수정] 투두 추가 다이얼로그 (Map 기반 addTodo 사용)
+  Future<void> _showAddTodoDialog() async {
+    final titleController = TextEditingController();
+    final contentController = TextEditingController();
+    DateTime selectedDate = DateTime.now(); // 추가할 투두의 날짜 (기본: 오늘)
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('새 ToDo 추가'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 날짜 선택 버튼
+                    Row(
+                      children: [
+                        const Text('날짜: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                        TextButton(
+                          onPressed: () async {
+                            final DateTime? picked = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDate,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2030),
+                            );
+                            if (picked != null) {
+                              setStateDialog(() {
+                                selectedDate = picked;
+                              });
+                            }
+                          },
+                          child: Text(DateFormat('yyyy-MM-dd (E)', 'ko_KR').format(selectedDate)),
+                        ),
+                      ],
+                    ),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(labelText: '제목', hintText: '예: 수학 문제집 풀기'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: contentController,
+                      decoration: const InputDecoration(labelText: '내용 (선택사항)', border: OutlineInputBorder()),
+                      maxLines: 3,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('취소')),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (titleController.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('제목을 입력해주세요.')));
+                      return;
+                    }
+
+                    try {
+                      // ✅ [핵심 수정] Map 형태로 데이터 전송
+                      // 서버가 요구하는 필드명(user_id, description 등)을 정확히 맞춰야 합니다.
+                      final Map<String, dynamic> newTodoData = {
+                        'user_id': widget.studentId,
+                        'title': titleController.text,
+                        'description': contentController.text, // 서버 컬럼명: description
+                        'date': DateFormat('yyyy-MM-dd').format(selectedDate),
+                        // 필요한 경우 기본값 추가
+                        'is_teacher_checked': 0,
+                        'student_status': 0,
+                      };
+
+                      await _api.addTodo(newTodoData);
+
+                      // 성공 시 처리
+                      if (mounted) {
+                        Navigator.pop(context); // 닫기
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('추가되었습니다.')));
+
+                        // 날짜 범위 자동 확장 (센스 있는 UX)
+                        if (selectedDate.isBefore(_startDate) || selectedDate.isAfter(_endDate)) {
+                          setState(() {
+                            if (selectedDate.isBefore(_startDate)) _startDate = selectedDate;
+                            if (selectedDate.isAfter(_endDate)) _endDate = selectedDate;
+                          });
+                        }
+                        _loadTodos(); // 목록 새로고침
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('추가 실패: $e')));
+                      }
+                    }
+                  },
+                  child: const Text('추가'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // 선생님 확인 상태 업데이트 (이건 기존 API 유지 - 상태 전용 엔드포인트 사용)
   Future<void> _updateTeacherTodoStatus(Todo todo, int newStatus) async {
     final originalStatus = todo.teacherStatus;
-    // Provider를 통해 현재 로그인된 선생님 ID 가져오기
     final teacherId = Provider.of<NasAuthService>(context, listen: false).currentUserId;
     if (teacherId == null) return;
 
@@ -62,8 +171,6 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
 
     try {
       await _api.updateTeacherTodoStatus(todo.id, newStatus, teacherId);
-      // 성공 시 UI 즉시 갱신을 위해 목록 다시 로드
-      _loadTodos();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('상태 업데이트 실패: $e')));
@@ -74,7 +181,7 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
     }
   }
 
-  // ✅ [수정] 제목과 내용을 모두 수정하는 대화상자
+  // ✅ [수정] 투두 수정 다이얼로그 (Map 기반 updateTodo 사용)
   Future<void> _editTodoDialog(Todo todo) async {
     final titleController = TextEditingController(text: todo.title);
     final contentController = TextEditingController(text: todo.content);
@@ -99,18 +206,20 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
             ElevatedButton(
               onPressed: () async {
                 final teacherId = Provider.of<NasAuthService>(context, listen: false).currentUserId;
-                if (teacherId == null) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('오류: 사용자 정보를 찾을 수 없습니다.')));
-                  }
-                  return;
-                }
-                final newTitle = titleController.text;
-                final newContent = contentController.text;
+                if (teacherId == null) return;
 
                 try {
-                  await _api.editTodo(todo.id, newTitle, newContent, teacherId);
-                  _loadTodos(); // 수정 성공 시 목록 새로고침
+                  // ✅ [핵심 수정] Map 형태로 업데이트 데이터 전송
+                  final Map<String, dynamic> updateData = {
+                    'title': titleController.text,
+                    'description': contentController.text, // 서버 컬럼명 주의
+                    'last_edited_by_id': teacherId,        // 수정자(선생님) ID 포함
+                  };
+
+                  // ID와 Map을 함께 전달
+                  await _api.updateTodo(todo.id, updateData);
+
+                  _loadTodos();
                   if (mounted) Navigator.pop(context);
                 } catch (e) {
                   if (mounted) {
@@ -126,24 +235,16 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
     );
   }
 
-  Icon _getStatusIcon(int? status) {
-    switch (status) {
-      case 1:
-        return const Icon(Icons.radio_button_checked, color: Colors.blue);
-      case 2:
-        return const Icon(Icons.check_box, color: Colors.green);
-      case 3:
-        return const Icon(Icons.close, color: Colors.red);
-      default:
-        return const Icon(Icons.check_box_outline_blank, color: Colors.grey);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('학생 ToDo 관리'),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddTodoDialog,
+        backgroundColor: Colors.blue,
+        child: const Icon(Icons.add, color: Colors.white),
       ),
       body: Column(
         children: [
@@ -155,7 +256,7 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
               onPressed: _selectDateRange,
             ),
           ),
-          const Divider(),
+          const Divider(height: 1),
           Expanded(
             child: FutureBuilder<List<Todo>>(
               future: _todosFuture,
@@ -172,10 +273,10 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
 
                 final todos = snapshot.data!;
                 return ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 80),
                   itemCount: todos.length,
                   itemBuilder: (context, index) {
                     final todo = todos[index];
-                    // ✅ [추가] 각 ListTile을 TodoItem 위젯으로 분리
                     return TodoItem(
                       todo: todo,
                       onEdit: () => _editTodoDialog(todo),
@@ -192,7 +293,9 @@ class _StudentTodoPageState extends State<StudentTodoPage> {
   }
 }
 
-// ✅ [추가] ListTile의 UI와 로직을 별도의 위젯으로 분리하여 가독성 및 재사용성 향상
+// ---------------------------------------------------------
+// TodoItem (기존 유지)
+// ---------------------------------------------------------
 class TodoItem extends StatefulWidget {
   final Todo todo;
   final VoidCallback onEdit;
@@ -225,9 +328,11 @@ class _TodoItemState extends State<TodoItem> {
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
       child: InkWell(
         onTap: () => setState(() => _isExpanded = !_isExpanded),
-        onLongPress: widget.onEdit, // 길게 누르면 수정
+        onLongPress: widget.onEdit,
+        borderRadius: BorderRadius.circular(8),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -240,28 +345,38 @@ class _TodoItemState extends State<TodoItem> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(widget.todo.title ?? '제목 없음', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        Text(widget.todo.title ?? '제목 없음',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 4),
-                        Text(widget.todo.date == null ? '날짜 미지정' : DateFormat('yyyy-MM-dd (E)', 'ko_KR').format(widget.todo.date!)),
+                        Text(
+                          widget.todo.date == null
+                              ? '날짜 미지정'
+                              : DateFormat('yyyy-MM-dd (E)', 'ko_KR').format(widget.todo.date!),
+                          style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                        ),
                       ],
                     ),
                   ),
-                  // ✅ [수정] 학생/선생님 아이콘 분리 표시
                   Row(
                     children: [
-                      Column(children: [const Text('학'), _getStatusIcon(widget.todo.studentStatus)]),
-                      const SizedBox(width: 8),
                       Column(children: [
-                        const Text('교'),
-                        IconButton(
-                          icon: _getStatusIcon(widget.todo.teacherStatus),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: () {
+                        const Text('학', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        _getStatusIcon(widget.todo.studentStatus)
+                      ]),
+                      const SizedBox(width: 16),
+                      Column(children: [
+                        const Text('교', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        InkWell(
+                          onTap: () {
                             int currentStatus = widget.todo.teacherStatus ?? 0;
                             int nextStatus = (currentStatus + 1) % 4;
                             widget.onStatusChange(nextStatus);
                           },
+                          borderRadius: BorderRadius.circular(20),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4.0),
+                            child: _getStatusIcon(widget.todo.teacherStatus),
+                          ),
                         ),
                       ]),
                     ],
@@ -270,13 +385,13 @@ class _TodoItemState extends State<TodoItem> {
               ),
               if (_isExpanded) ...[
                 const Divider(height: 24),
-                Text(widget.todo.content ?? '내용 없음'),
+                Text(widget.todo.content ?? '', style: const TextStyle(fontSize: 14)),
                 if (widget.todo.lastEditedAt != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
+                    padding: const EdgeInsets.only(top: 12.0),
                     child: Text(
                       '최종 수정: ${widget.todo.lastEditedByName ?? ''} (${DateFormat('yy-MM-dd HH:mm').format(widget.todo.lastEditedAt!)})',
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
                     ),
                   ),
               ],
